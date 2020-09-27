@@ -156,25 +156,31 @@ class COCODetection(DatasetSplit):
             y1 = min(max(y1, 0), height)
             y2 = min(max(y2, 0), height)
             w, h = x2 - x1, y2 - y1
+            # Many annotations won't have an "area", so we can trivially calculate it here:
+            area_calc = w * h
             # Require non-zero seg area and more than 1x1 box size
-            if obj['area'] > 1 and w > 0 and h > 0:
+            if area_calc > 1 and w > 0 and h > 0:
                 all_boxes.append([x1, y1, x2, y2])
                 all_cls.append(self.COCO_id_to_category_id.get(obj['category_id'], obj['category_id']))
                 iscrowd = obj.get("iscrowd", 0)
                 all_iscrowd.append(iscrowd)
 
                 if add_mask:
-                    segs = obj['segmentation']
-                    if not isinstance(segs, list):
-                        assert iscrowd == 1
+                    # Many annotations won't have a segmentation, in which case this will (unnecessarily) break:
+                    try:
+                        segs = obj['segmentation']
+                        if not isinstance(segs, list):
+                            assert iscrowd == 1
+                            all_segm.append(None)
+                        else:
+                            valid_segs = [np.asarray(p).reshape(-1, 2).astype('float32') for p in segs if len(p) >= 6]
+                            if len(valid_segs) == 0:
+                                logger.error("Object {} in image {} has no valid polygons!".format(objid, img['file_name']))
+                            elif len(valid_segs) < len(segs):
+                                logger.warn("Object {} in image {} has invalid polygons!".format(objid, img['file_name']))
+                            all_segm.append(valid_segs)
+                      except KeyError:
                         all_segm.append(None)
-                    else:
-                        valid_segs = [np.asarray(p).reshape(-1, 2).astype('float32') for p in segs if len(p) >= 6]
-                        if len(valid_segs) == 0:
-                            logger.error("Object {} in image {} has no valid polygons!".format(objid, img['file_name']))
-                        elif len(valid_segs) < len(segs):
-                            logger.warn("Object {} in image {} has invalid polygons!".format(objid, img['file_name']))
-                        all_segm.append(valid_segs)
 
         # all geometrically-valid boxes are returned
         if len(all_boxes):
